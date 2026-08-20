@@ -30,6 +30,7 @@ import dev.lackluster.mihelper.hook.rules.systemui.statusbar.HideCarrierLabel
 import dev.lackluster.mihelper.hook.rules.systemui.statusbar.HideCellularIcon
 import dev.lackluster.mihelper.hook.rules.systemui.statusbar.IconManager
 import dev.lackluster.mihelper.hook.rules.systemui.statusbar.IgnoreSysIconSettings
+import dev.lackluster.mihelper.hook.rules.systemui.statusbar.IslandClockSpace
 import dev.lackluster.mihelper.hook.rules.systemui.statusbar.CompoundIcon
 import dev.lackluster.mihelper.hook.rules.systemui.statusbar.MiuiClock
 import dev.lackluster.mihelper.hook.rules.systemui.statusbar.MiuiClockFontWeight
@@ -81,6 +82,7 @@ object SystemUI : StaticHooker() {
         attach(CompoundIcon)
         attach(MiuiClock)
         attach(MiuiClockFontWeight)
+        attach(IslandClockSpace)
         attach(NetworkSpeed)
         attach(NotificationMaxNumber)
         attach(StackedMobileIcon)
