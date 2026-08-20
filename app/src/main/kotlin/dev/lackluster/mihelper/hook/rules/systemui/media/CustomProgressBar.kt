@@ -174,32 +174,34 @@ internal object CustomProgressBar : StaticHooker() {
     }
 
     override fun onHook() {
+        // MiuiMediaViewHolder's constructor is inlined away on newer ROMs, so anchor on the
+        // setter instead — it is the first point where a fully populated holder exists.
+        val metSetMediaViewHolder = "com.android.systemui.statusbar.notification.mediacontrol.MiuiMediaHeaderView"
+            .toClassOrNull()?.resolve()?.optional(true)?.firstMethodOrNull {
+                name = "setMediaViewHolder"
+            }
         if (ncProgressStyle == 0) {
             if (clzHyperProgressSeekBar != null) {
-                clzMiuiMediaViewHolder?.apply {
-                    resolve().firstConstructor().hook {
-                        val ori = proceed()
-                        val seekBar = ncSeekBar?.get(thisObject)
-                        if (seekBar != null && clzHyperProgressSeekBar?.isInstance(seekBar) == true) {
-                            val context = seekBar.context
-                            var height = ncProgressWidth.dp(context)
-                            if (height % 2 != 0) {
-                                height -= 1
-                            }
-                            fldProgressSeekBarMinHeight?.set(seekBar, height)
-                            fldProgressHeight?.set(seekBar, height)
+                metSetMediaViewHolder?.hook {
+                    val ori = proceed()
+                    val seekBar = getArg(0)?.let { ncSeekBar?.get(it) }
+                    if (seekBar != null && clzHyperProgressSeekBar?.isInstance(seekBar) == true) {
+                        val context = seekBar.context
+                        var height = ncProgressWidth.dp(context)
+                        if (height % 2 != 0) {
+                            height -= 1
                         }
-                        result(ori)
+                        fldProgressSeekBarMinHeight?.set(seekBar, height)
+                        fldProgressHeight?.set(seekBar, height)
                     }
+                    result(ori)
                 }
             }
         } else {
-            clzMiuiMediaViewHolder?.apply {
-                resolve().firstConstructor().hook {
-                    val ori = proceed()
-                    getRealSeekBar(thisObject, false)
-                    result(ori)
-                }
+            metSetMediaViewHolder?.hook {
+                val ori = proceed()
+                getArg(0)?.let { getRealSeekBar(it, false) }
+                result(ori)
             }
             clzSeekBarObserver?.apply {
                 val fldOuter = resolve().firstFieldOrNull {
@@ -301,28 +303,40 @@ internal object CustomProgressBar : StaticHooker() {
         }
         if (diProgressStyle == 0) {
             if (clzHyperProgressSeekBar != null) {
-                clzMiuiIslandMediaViewHolder?.apply {
-                    resolve().firstConstructor().hook {
+                // The holder's constructor is inlined away on newer ROMs; attach() is the first
+                // point where both the real and dummy holders exist.
+                clzMiuiIslandMediaViewBinderImpl?.apply {
+                    resolve().optional(true).firstMethodOrNull {
+                        name = "attach"
+                        parameterCount = 2
+                    }?.hook {
                         val ori = proceed()
-                        val seekBar = diSeekBar?.get(thisObject)
-                        if (seekBar != null && clzHyperProgressSeekBar?.isInstance(seekBar) == true) {
-                            val context = seekBar.context
-                            var height = diProgressWidth.dp(context)
-                            if (height % 2 != 0) {
-                                height -= 1
+                        listOfNotNull(getArg(0), getArg(1)).forEach { holder ->
+                            val seekBar = diSeekBar?.get(holder)
+                            if (seekBar != null && clzHyperProgressSeekBar?.isInstance(seekBar) == true) {
+                                val context = seekBar.context
+                                var height = diProgressWidth.dp(context)
+                                if (height % 2 != 0) {
+                                    height -= 1
+                                }
+                                fldProgressSeekBarMinHeight?.set(seekBar, height)
+                                fldProgressHeight?.set(seekBar, height)
                             }
-                            fldProgressSeekBarMinHeight?.set(seekBar, height)
-                            fldProgressHeight?.set(seekBar, height)
                         }
                         result(ori)
                     }
                 }
             }
         } else {
-            clzMiuiIslandMediaViewHolder?.apply {
-                resolve().firstConstructor().hook {
+            clzMiuiIslandMediaViewBinderImpl?.apply {
+                resolve().optional(true).firstMethodOrNull {
+                    name = "attach"
+                    parameterCount = 2
+                }?.hook {
                     val ori = proceed()
-                    getRealSeekBar(thisObject, true)
+                    listOfNotNull(getArg(0), getArg(1)).forEach { holder ->
+                        getRealSeekBar(holder, true)
+                    }
                     result(ori)
                 }
             }

@@ -22,6 +22,7 @@ package dev.lackluster.mihelper.hook.rules.systemui.statusbar
 
 import com.highcapable.kavaref.KavaRef.Companion.resolve
 import com.highcapable.kavaref.condition.type.Modifiers
+import com.highcapable.kavaref.extension.makeAccessible
 import dev.lackluster.hyperx.ui.preference.core.PreferenceKey
 import dev.lackluster.mihelper.data.Constants
 import dev.lackluster.mihelper.data.Constants.COMPOUND_ICON_REAL_SLOTS
@@ -230,27 +231,53 @@ object IconManager : StaticHooker() {
         fldRightBlockList.set(null, statusBarBlockList)
         fldControlCenterBlockList.set(null, controlCenterBlockList)
         if (iconPositionMode != 0 || addCompoundIcon || addCustomWifiSignal || iconPositionAutoReorder) {
+            val desiredOrder: () -> Array<String> = {
+                if (iconPositionAutoReorder) {
+                    val stackedMobileSlots = listOf(
+                        IconSlots.STACKED_MOBILE_TYPE,
+                        IconSlots.STACKED_MOBILE_ICON,
+                        IconSlots.SINGLE_MOBILE_SIM1,
+                        IconSlots.SINGLE_MOBILE_SIM2,
+                    )
+                    finalSlots.sortedBy {
+                        (it !in statusBarBlockList) || (it in stackedMobileSlots)
+                    }.toTypedArray()
+                } else {
+                    finalSlots
+                }
+            }
             "com.android.systemui.statusbar.phone.ui.StatusBarIconList".toClassOrNull()?.apply {
-                resolve().firstConstructorOrNull {
+                resolve().optional(true).firstConstructorOrNull {
                     parameters(Array<String>::class)
                 }?.hook {
                     val newArgs = args.toTypedArray()
-                    if (iconPositionAutoReorder) {
-                        val stackedMobileSlots = listOf(
-                            IconSlots.STACKED_MOBILE_TYPE,
-                            IconSlots.STACKED_MOBILE_ICON,
-                            IconSlots.SINGLE_MOBILE_SIM1,
-                            IconSlots.SINGLE_MOBILE_SIM2,
-                        )
-                        finalSlots.sortedBy {
-                            (it !in statusBarBlockList) || (it in stackedMobileSlots)
-                        }.toTypedArray().let {
-                            newArgs[0] = it
-                        }
-                    } else {
-                        newArgs[0] = finalSlots
-                    }
+                    newArgs[0] = desiredOrder()
                     result(proceed(newArgs))
+                }
+                // Newer ROMs inline that constructor away and build the list inside the Dagger
+                // provider instead, so reorder the slots it hands back. mViewOnlySlots wraps the
+                // very same ArrayList, which is why this rebuilds in place rather than replacing it.
+                val fldSlots = resolve().optional(true).firstFieldOrNull {
+                    name = "mSlots"
+                }?.toTyped<MutableList<Any>>()
+                val ctorSlot = $$"com.android.systemui.statusbar.phone.ui.StatusBarIconList$Slot"
+                    .toClassOrNull()?.resolve()?.optional(true)?.firstConstructorOrNull {
+                        parameters(String::class)
+                    }?.self?.apply { makeAccessible() }
+                if (fldSlots != null && ctorSlot != null) {
+                    "com.android.systemui.statusbar.dagger.CentralSurfacesDependenciesModule_ProvideStatusBarIconListFactory"
+                        .toClassOrNull()?.resolve()?.optional(true)?.firstMethodOrNull {
+                            name = "provideStatusBarIconList"
+                            modifiers(Modifiers.STATIC)
+                        }?.hook {
+                            val iconList = proceed() ?: return@hook result(null)
+                            val slots = fldSlots.get(iconList) ?: return@hook result(iconList)
+                            slots.clear()
+                            desiredOrder().forEach { slotName ->
+                                ctorSlot.newInstance(slotName)?.let { slots.add(it) }
+                            }
+                            result(iconList)
+                        }
                 }
             }
         }

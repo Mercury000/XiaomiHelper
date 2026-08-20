@@ -227,6 +227,25 @@ object CustomBackground : StaticHooker() {
             )
             else -> return
         }
+        // Newer ROMs moved the media background out of updateMediaBackground() and into a set of
+        // NotificationViewEffectInterface singletons, each of which writes straight to
+        // MiuiMediaViewHolder.mediaBg. Neutralise them so they stop overwriting our own drawable.
+        listOf(
+            "MediaViewNormalEffect",
+            "MediaViewBlurEffect",
+            "MediaViewBlurOnKeyguardEffect",
+            "MediaViewGlassEffect",
+            "MediaViewGlassFullAodEffect",
+            "MediaViewGlassOnKeyguardEffect",
+            "MediaViewGlassOnKeyguardLightWallPaperEffect",
+        ).forEach { effectName ->
+            "com.android.systemui.statusbar.notification.style.vieweffect.$effectName"
+                .toClassOrNull()?.resolve()?.optional(true)?.firstMethodOrNull {
+                    name = "apply"
+                }?.hook {
+                    result(null)
+                }
+        }
         clzMiuiMediaViewControllerImpl?.apply {
             val fldContext = resolve().firstFieldOrNull {
                 name = "context"
@@ -242,7 +261,7 @@ object CustomBackground : StaticHooker() {
             }?.hook {
                 result(null)
             }
-            resolve().firstMethodOrNull {
+            resolve().optional(true).firstMethodOrNull {
                 name = "updateMediaBackground"
             }?.hook {
                 result(null)

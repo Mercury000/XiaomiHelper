@@ -8,7 +8,6 @@ import dev.lackluster.mihelper.hook.rules.systemui.StatusBarActions
 import dev.lackluster.mihelper.hook.rules.systemui.StatusBarIconTint
 import dev.lackluster.mihelper.hook.rules.systemui.lockscreen.CarrierLabelFontWeight
 import dev.lackluster.mihelper.hook.rules.systemui.lockscreen.ForceColorScheme
-import dev.lackluster.mihelper.hook.rules.systemui.lockscreen.HideDisturbNotification
 import dev.lackluster.mihelper.hook.rules.systemui.lockscreen.KeepNotification
 import dev.lackluster.mihelper.hook.rules.systemui.lockscreen.LockscreenDoubleTapToSleep
 import dev.lackluster.mihelper.hook.rules.systemui.lockscreen.StatusBarClockContainer
@@ -53,7 +52,6 @@ object SystemUI : StaticHooker() {
         attach(StatusBarIconTint)
 
         attach(LockscreenDoubleTapToSleep)
-        attach(HideDisturbNotification)
         attach(KeepNotification)
         attach(StatusBarClockContainer)
         attach(CarrierLabelFontWeight)
@@ -90,8 +88,5 @@ object SystemUI : StaticHooker() {
         attach(StatusBarTapGesture)
         attach(WifiIcon)
         attach(CustomWifiSignalIcon)
-//        attach(UnlockMultipleTask)
-//        attach(HideTopBar)
-//        attach(PadClockAnim)
     }
 }

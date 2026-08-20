@@ -6,6 +6,7 @@ import com.highcapable.kavaref.resolver.ConstructorResolver
 import com.highcapable.kavaref.resolver.MethodResolver
 import dev.lackluster.mihelper.hook.utils.DexKit
 import dev.lackluster.mihelper.hook.utils.d
+import dev.lackluster.mihelper.hook.utils.e
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import java.lang.reflect.Executable
@@ -60,7 +61,9 @@ sealed class BaseHooker {
         if (oldState != newState) {
             if (newState) {
                 d { "Hook" }
-                if (!isHooked) onHook()
+                // Keep a hooker that fails to resolve its targets on the running ROM from
+                // aborting every sibling queued behind it.
+                if (!isHooked) runCatching { onHook() }.onFailure { e(it) { "onHook failed" } }
             } else {
                 when (this) {
                     is StaticHooker -> {

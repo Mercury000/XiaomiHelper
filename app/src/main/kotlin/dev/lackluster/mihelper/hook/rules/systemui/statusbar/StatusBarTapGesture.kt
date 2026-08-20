@@ -21,16 +21,15 @@
 package dev.lackluster.mihelper.hook.rules.systemui.statusbar
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.os.SystemClock
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.kavaref.condition.type.Modifiers
 import dev.lackluster.mihelper.data.preference.Preferences
 import dev.lackluster.mihelper.hook.base.StaticHooker
+import dev.lackluster.mihelper.hook.rules.systemui.ResourcesUtils
 import dev.lackluster.mihelper.hook.rules.systemui.compat.PairCompat
 import dev.lackluster.mihelper.hook.rules.systemui.compat.ReadonlyStateFlowCompat
 import dev.lackluster.mihelper.hook.utils.CommonGesture
@@ -46,12 +45,6 @@ object StatusBarTapGesture : StaticHooker() {
     private val singleTapGesture by Preferences.SystemUI.StatusBar.SINGLE_TAP_GESTURE.lazyGet()
 
     private val clzStatusBarClickTool by "com.miui.systemui.statusbar.StatusBarClickTool".lazyClassOrNull()
-    private val fldApplication by lazy {
-        "com.android.systemui.SystemUIApplication".toClassOrNull()?.resolve()?.firstFieldOrNull {
-            name = "sContext"
-            modifiers(Modifiers.STATIC)
-        }?.toTyped<Context>()
-    }
 
     override fun onInit() {
         updateSelfState(doubleTapGesture != 0 || singleTapGesture != 0)
@@ -64,11 +57,10 @@ object StatusBarTapGesture : StaticHooker() {
                 val fldCommandQueue = resolve().firstFieldOrNull {
                     name = "commandQueue"
                 }?.toTyped<Any>()
-                val fldDisableState = "".toClassOrNull()?.let {
-                    resolve().firstFieldOrNull {
+                val fldDisableState = "com.android.systemui.statusbar.notification.data.repository.DynamicIslandCommandQueueRepository"
+                    .toClassOrNull()?.resolve()?.firstFieldOrNull {
                         name = "disableState"
                     }?.toTyped<Any>()
-                }
                 resolve().firstMethodOrNull {
                     name = "invokeInputManager"
                 }?.hook {
@@ -96,7 +88,7 @@ object StatusBarTapGesture : StaticHooker() {
                         }
                         lastClickTime = currentTime
 
-                        val context = fldApplication?.get(null)?.applicationContext
+                        val context = ResourcesUtils.hostContext?.applicationContext
                         if (context != null) {
                             CommonGesture.doAction(context, action)
                         }

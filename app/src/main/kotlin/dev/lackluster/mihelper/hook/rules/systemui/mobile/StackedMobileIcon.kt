@@ -104,7 +104,10 @@ object StackedMobileIcon : StaticHooker() {
         }
     }
 
-    private val clzSignalIconModelCellular by $$"com.android.systemui.statusbar.pipeline.mobile.domain.model.SignalIconModel$Cellular".lazyClassOrNull()
+    private val clzSignalIconModelCellular by lazy {
+        $$"com.android.systemui.statusbar.pipeline.mobile.domain.model.SignalIconModel$CellularTypeIconModel$Cellular".toClassOrNull()
+            ?: $$"com.android.systemui.statusbar.pipeline.mobile.domain.model.SignalIconModel$Cellular".toClassOrNull()
+    }
     private val fldLevel by lazy {
         clzSignalIconModelCellular?.resolve()?.firstFieldOrNull {
             name = "level"

@@ -156,10 +156,6 @@ private fun SystemUIPageContent(
             titleRes = R.string.ui_title_systemui_lock_screen,
         ) {
             SwitchPreference(
-                key = Preferences.SystemUI.LockScreen.HIDE_DISTURB_NOTIF,
-                title = stringResource(R.string.systemui_lock_hide_disturb),
-            )
-            SwitchPreference(
                 key = Preferences.SystemUI.LockScreen.KEEP_NOTIFICATION,
                 title = stringResource(R.string.systemui_lock_keep_notif),
                 summary = stringResource(R.string.systemui_lock_keep_notif_tips),

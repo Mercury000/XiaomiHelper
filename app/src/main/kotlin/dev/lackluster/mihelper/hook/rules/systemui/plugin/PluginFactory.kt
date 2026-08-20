@@ -39,8 +39,8 @@ object PluginFactory : StaticHooker() {
 
     override fun onInit() {
         $$"com.android.systemui.shared.plugins.PluginInstance$PluginFactory".toClassOrNull()?.apply {
-            val fldComponentName = resolve().firstFieldOrNull {
-                name = "mComponentName"
+            val fldComponentName = resolve().optional(true).firstFieldOrNull {
+                name { it == "componentName" || it == "mComponentName" }
             }?.toTyped<ComponentName>()
             resolve().firstMethodOrNull {
                 name = "createPluginContext"

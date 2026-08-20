@@ -12,6 +12,9 @@ abstract class ContextAwareHooker : StaticHooker() {
 
     private var isInitialized = false
 
+    var hostContext: Context? = null
+        private set
+
     private val metAttachBaseContext by lazy {
         "android.app.Application".toClass().resolve().firstMethod {
             name = "attachBaseContext"
@@ -25,6 +28,7 @@ abstract class ContextAwareHooker : StaticHooker() {
             if (!isInitialized) {
                 val baseContext = getArg(0) as? Context
                 if (baseContext != null) {
+                    hostContext = baseContext
                     val scope = ContextScope(baseContext, targetPackage)
                     scope.onReady()
                     isInitialized = true

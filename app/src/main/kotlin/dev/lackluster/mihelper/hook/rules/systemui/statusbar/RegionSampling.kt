@@ -51,15 +51,32 @@ object RegionSampling : StaticHooker() {
             }
         }
         "com.android.systemui.statusbar.phone.LightBarControllerImplInjector".toClassOrNull()?.apply {
-            val useRegionSampling = resolve().firstFieldOrNull {
+            val useRegionSampling = resolve().optional(true).firstFieldOrNull {
                 name = "useRegionSampling"
             }?.toTyped<Boolean>()
+            if (useRegionSampling != null) {
+                resolve().firstConstructor().hook {
+                    val ori = proceed()
+                    if (mode == 1) {
+                        useRegionSampling.set(thisObject, true)
+                    } else if (mode == 2) {
+                        useRegionSampling.set(thisObject, false)
+                    }
+                    result(ori)
+                }
+            }
+        }
+        // The boolean above was replaced by a flow on the sampling interactor.
+        "com.android.systemui.statusbar.domain.interactor.StatusBarRegionSamplingInteractorImpl".toClassOrNull()?.apply {
+            val isRegionSamplingEnabled = resolve().optional(true).firstFieldOrNull {
+                name = "isRegionSamplingEnabled"
+            }?.toTyped<Any>()
             resolve().firstConstructor().hook {
                 val ori = proceed()
                 if (mode == 1) {
-                    useRegionSampling?.set(thisObject, true)
+                    isRegionSamplingEnabled?.set(thisObject, readonlyStateFlowTrue)
                 } else if (mode == 2) {
-                    useRegionSampling?.set(thisObject, false)
+                    isRegionSamplingEnabled?.set(thisObject, readonlyStateFlowFalse)
                 }
                 result(ori)
             }

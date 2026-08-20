@@ -94,11 +94,16 @@ internal object MediaControlBgFactory : StaticHooker() {
         }?.toTyped<Any>()
     }
     val enumStyleContent by lazy {
-        "com.android.systemui.monet.Style".toClass().resolve().firstMethodOrNull {
+        // ColorScheme takes the style as an int. On older ROMs monet.Style was unboxed by R8, so
+        // valueOf already handed back an int; newer ones swapped it for libmonet's Variant, which
+        // stays a real enum and has to be reduced to its ordinal.
+        val clzStyle = "com.android.systemui.monet.Style".toClassOrNull()
+            ?: "com.google.ux.material.libmonet.dynamiccolor.Variant".toClassOrNull()
+        clzStyle?.resolve()?.firstMethodOrNull {
             name = "valueOf"
             parameters(String::class)
             modifiers(Modifiers.STATIC)
-        }?.invoke("CONTENT")
+        }?.invoke("CONTENT")?.let { if (it is Enum<*>) it.ordinal else it }
     }
 
     private val metIconGetBitmap by lazy {

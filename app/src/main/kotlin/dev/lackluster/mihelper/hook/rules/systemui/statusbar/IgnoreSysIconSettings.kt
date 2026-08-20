@@ -28,6 +28,8 @@ import dev.lackluster.mihelper.hook.utils.RemotePreferences.lazyGet
 import dev.lackluster.mihelper.hook.utils.toTyped
 
 object IgnoreSysIconSettings : StaticHooker() {
+    private const val PRIVACY_SLOT = "privacy"
+
     private val ignoreSystem by Preferences.SystemUI.StatusBar.IconTuner.IGNORE_SYS_SETTINGS.lazyGet()
     private val hidePrivacy by Preferences.SystemUI.StatusBar.IconTuner.HIDE_PRIVACY.lazyGet()
     private val showNetSpeed by lazy {
@@ -40,9 +42,10 @@ object IgnoreSysIconSettings : StaticHooker() {
 
     override fun onHook() {
         "com.android.systemui.statusbar.policy.StatusBarIconObserver".toClassOrNull()?.apply {
-            resolve().firstMethodOrNull {
+            val metIsIconBlocked = resolve().optional(true).firstMethodOrNull {
                 name = "isIconBlocked"
-            }?.hook {
+            }
+            metIsIconBlocked?.hook {
                 val slot = getArg(0) as? String
                 if (slot == "privacy") {
                     result(hidePrivacy)
@@ -52,12 +55,23 @@ object IgnoreSysIconSettings : StaticHooker() {
                     result(proceed())
                 }
             }
-            if (ignoreSystem) {
-                resolve().firstMethodOrNull {
-                    name = "loadStatusBarIcon"
-                }?.hook {
-                    result("")
+            // Newer ROMs dropped the per-slot isIconBlocked(); the hidden set is now carried
+            // as the comma-separated list returned here, so express both prefs through it.
+            resolve().optional(true).firstMethodOrNull {
+                name = "loadStatusBarIcon"
+            }?.hook {
+                val slots = if (ignoreSystem) {
+                    mutableListOf()
+                } else {
+                    (proceed() as? String).orEmpty()
+                        .split(',')
+                        .filter { it.isNotBlank() }
+                        .toMutableList()
                 }
+                if (hidePrivacy && metIsIconBlocked == null && PRIVACY_SLOT !in slots) {
+                    slots.add(PRIVACY_SLOT)
+                }
+                result(slots.joinToString(","))
             }
         }
         if (ignoreSystem) {
