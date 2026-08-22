@@ -31,6 +31,7 @@ import dev.lackluster.mihelper.data.preference.Preferences
 import dev.lackluster.mihelper.hook.base.StaticHooker
 import dev.lackluster.mihelper.hook.utils.RemotePreferences.get
 import dev.lackluster.mihelper.hook.utils.RemotePreferences.lazyGet
+import dev.lackluster.mihelper.hook.utils.TypedField
 import dev.lackluster.mihelper.hook.utils.toTyped
 import kotlin.collections.listOf
 
@@ -228,8 +229,11 @@ object IconManager : StaticHooker() {
                 }
             }
         }
-        fldRightBlockList.set(null, statusBarBlockList)
-        fldControlCenterBlockList.set(null, controlCenterBlockList)
+        // OS4 declares these as `static final ArrayList` and hands the very same instance to every
+        // icon manager, so reassigning the field is a no-op there. Mutate the live list instead and
+        // only fall back to assignment if it turns out not to be mutable.
+        applyBlockList(fldRightBlockList, statusBarBlockList)
+        applyBlockList(fldControlCenterBlockList, controlCenterBlockList)
         if (iconPositionMode != 0 || addCompoundIcon || addCustomWifiSignal || iconPositionAutoReorder) {
             val desiredOrder: () -> Array<String> = {
                 if (iconPositionAutoReorder) {
@@ -281,6 +285,20 @@ object IconManager : StaticHooker() {
                 }
             }
         }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun applyBlockList(field: TypedField<Any, List<String>>?, newList: List<String>) {
+        if (field == null) return
+        val mutable = runCatching { field.get(null) }.getOrNull() as? MutableList<String>
+        if (mutable != null) {
+            val ok = runCatching {
+                mutable.clear()
+                mutable.addAll(newList)
+            }.isSuccess
+            if (ok) return
+        }
+        runCatching { field.set(null, newList) }
     }
 
     private fun handleIcon(key: PreferenceKey<Int>, name: String, statusBarList: MutableList<String>, controlList: MutableList<String>) {

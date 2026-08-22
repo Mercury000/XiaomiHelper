@@ -45,6 +45,13 @@ object LeftContainer : StaticHooker() {
     }
     private val leftContainers = mutableListOf<ViewGroup>()
 
+    // OS4 no longer exposes these through the status bar owner, so grab the singletons as they
+    // are constructed and keep them for the icon-group registration below.
+    @Volatile
+    private var iconManagerFactory: Any? = null
+    @Volatile
+    private var statusBarIconControllerRef: Any? = null
+
     override fun onInit() {
         updateSelfState(leftContainerMode != 0)
     }
@@ -75,6 +82,17 @@ object LeftContainer : StaticHooker() {
             name = "animatorController"
         }?.toTyped<Any>()
         val clzStatusBarIconControllerImpl = "com.android.systemui.statusbar.phone.ui.StatusBarIconControllerImpl".toClassOrNull()
+        clzStatusBarIconControllerImpl?.resolve()?.optional(true)?.firstConstructorOrNull()?.hook {
+            val ori = proceed()
+            statusBarIconControllerRef = thisObject
+            result(ori)
+        }
+        $$"com.android.systemui.statusbar.phone.ui.TintedIconManager$Factory".toClassOrNull()
+            ?.resolve()?.optional(true)?.firstConstructorOrNull()?.hook {
+                val ori = proceed()
+                iconManagerFactory = thisObject
+                result(ori)
+            }
         val metAddIconGroup = clzStatusBarIconControllerImpl?.resolve()?.firstMethodOrNull {
             name = "addIconGroup"
             parameterCount = 1
@@ -112,94 +130,142 @@ object LeftContainer : StaticHooker() {
         val enumStateTransitionIslandHide = enumValueOf2?.invoke("ISLAND_HIDE")
         val enumStateTransitionIslandShow = enumValueOf2?.invoke("ISLAND_SHOW")
         // 状态栏
-        "com.android.systemui.statusbar.phone.MiuiCollapsedStatusBarFragment".toClassOrNull()?.apply {
-            val fldStatusBar = resolve().firstFieldOrNull {
+        // OS4 removed MiuiCollapsedStatusBarFragment; the same state now lives on
+        // HomeStatusBarViewBinderInjector, which HomeStatusBarViewBinderImpl.bind() populates.
+        // The icon controller and the TintedIconManager factory are no longer reachable from the
+        // owner, so both are captured from their constructors instead.
+        val clzInjector = "com.android.systemui.statusbar.pipeline.shared.ui.binder.HomeStatusBarViewBinderInjector".toClassOrNull()
+            ?: "com.android.systemui.statusbar.phone.MiuiCollapsedStatusBarFragment".toClassOrNull()
+        clzInjector?.apply {
+            val fldStatusBar = resolve().optional(true).firstFieldOrNull {
                 name = "mStatusBar"
                 superclass()
             }?.toTyped<FrameLayout>()
-            val fldDarkIconManagerFactory = resolve().firstFieldOrNull {
-                name = "mDarkIconManagerFactory"
+            val fldDarkIconDispatcher = resolve().optional(true).firstFieldOrNull {
+                name = "darkIconDispatcher"
                 superclass()
             }?.toTyped<Any>()
-            val fldHomeStatusBarComponent = resolve().firstFieldOrNull {
-                name = "mHomeStatusBarComponent"
-                superclass()
-            }?.toTyped<Any>()
-            val fldStatusBarIconController = resolve().firstFieldOrNull {
-                name = "mStatusBarIconController"
-                superclass()
-            }?.toTyped<Any>()
-            val fldStatusContainer = resolve().firstFieldOrNull {
+            val fldStatusContainer = resolve().optional(true).firstFieldOrNull {
                 name = "mStatusContainer"
                 superclass()
             }?.toTyped<Any>()
-            val fldNotificationIconAreaInner = resolve().firstFieldOrNull {
+            val fldNotificationIconAreaInner = resolve().optional(true).firstFieldOrNull {
                 name = "mNotificationIconAreaInner"
                 superclass()
             }?.toTyped<Any>()
-            val metCancelAnimate = resolve().firstMethodOrNull {
+            val metCancelAnimate = resolve().optional(true).firstMethodOrNull {
                 name = "cancelAnimate"
                 parameters(View::class)
                 superclass()
             }?.toTyped<Unit>()
-            val metAnimateHiddenState = resolve().firstMethodOrNull {
+            // animateHiddenState(int, View, boolean, boolean) -> animateHide(View, boolean)
+            val metAnimateHiddenState = (resolve().optional(true).firstMethodOrNull {
+                name = "animateHide"
+                parameters(View::class, Boolean::class)
+                superclass()
+            } ?: resolve().optional(true).firstMethodOrNull {
                 name = "animateHiddenState"
                 parameters(Int::class, View::class, Boolean::class, Boolean::class)
                 superclass()
-            }?.self?.apply { makeAccessible() }
-            val metAnimateShow = resolve().firstMethodOrNull {
+            })?.self?.apply { makeAccessible() }
+            // animateShow(View, boolean, boolean) -> animateShow(View, boolean)
+            val metAnimateShow = (resolve().optional(true).firstMethodOrNull {
+                name = "animateShow"
+                parameters(View::class, Boolean::class)
+                superclass()
+            } ?: resolve().optional(true).firstMethodOrNull {
                 name = "animateShow"
                 parameters(View::class, Boolean::class, Boolean::class)
                 superclass()
-            }?.self?.apply { makeAccessible() }
-            resolve().firstMethodOrNull {
-                name = "onViewCreated"
-            }?.hook {
-                val ori = proceed()
-                val mStatusBar = fldStatusBar?.get(thisObject) ?: return@hook result(ori)
-                val leftStatusIcons = getOrPutStatusIconContainer(mStatusBar, mStatusBar.context, true) ?: return@hook result(ori)
-                mStatusBar.findViewById<ViewGroup>(notification_icon_area)?.let { notificationContainer ->
-                    val parent = notificationContainer.parent as? ViewGroup
-                    parent?.apply {
-                        addView(
-                            leftStatusIcons,
-                            indexOfChild(notificationContainer),
-                            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT)
-                        )
-                    }
+            })?.self?.apply { makeAccessible() }
+            // Index of the View parameter differs between the two shapes.
+            val hideViewArgIndex = if (metAnimateHiddenState?.parameterCount == 2) 0 else 1
+            val setUpLeftContainer = { injector: Any ->
+                val mStatusBar = fldStatusBar?.get(injector)
+                val leftStatusIcons = mStatusBar?.let {
+                    getOrPutStatusIconContainer(it, it.context, true)
                 }
-                val darkIconDispatcher = fldHomeStatusBarComponent?.get(thisObject)?.let {
-                    it.asResolver().firstFieldOrNull {
-                        name = "darkIconDispatcher"
-                    }?.get()
-                }
-                val darkIconManager = fldDarkIconManagerFactory?.get(thisObject)?.let {
-                    it.asResolver().firstMethodOrNull {
-                        name = "create"
-                        parameterCount = 3
-                    }?.invoke(leftStatusIcons, enumStatusBarLocationHome, darkIconDispatcher)
-                }
-                val statusBarIconController = fldStatusBarIconController?.get(thisObject) ?: return@hook result(ori)
-                metAddIconGroup?.invoke(statusBarIconController, darkIconManager)
-                val blockList = fldStatusBarIconList?.get(statusBarIconController)?.let { controller ->
-                    fldSlots?.get(controller)?.let { slots ->
-                        slots.mapNotNull { slot ->
-                            fldSlotName?.get(slot)
+                if (mStatusBar != null && leftStatusIcons != null) {
+                    if (leftStatusIcons.parent == null) {
+                        mStatusBar.findViewById<ViewGroup>(notification_icon_area)?.let { notificationContainer ->
+                            (notificationContainer.parent as? ViewGroup)?.apply {
+                                addView(
+                                    leftStatusIcons,
+                                    indexOfChild(notificationContainer),
+                                    LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT)
+                                )
+                            }
                         }
                     }
-                }?.let {
-                    getLeftBlockList(it)
-                } ?: leftBlockList
-                metSetIgnoredSlots?.invoke(leftStatusIcons, blockList)
-                fldStatusContainer?.get(thisObject)?.let { container ->
-                    fldAnimatable?.get(container)?.let {
-                        metSetAnimatable?.invoke(leftStatusIcons, it)
+                    val darkIconDispatcher = fldDarkIconDispatcher?.get(injector)
+                    // create(container, location, dispatcher) -> createMiuiIconManager(container, location, boolean, int)
+                    val darkIconManager = iconManagerFactory?.let { factory ->
+                        factory.asResolver().optional(true).firstMethodOrNull {
+                            name = "createMiuiIconManager"
+                            parameterCount = 4
+                        }?.invoke(leftStatusIcons, enumStatusBarLocationHome, true, 0)
+                            ?: factory.asResolver().optional(true).firstMethodOrNull {
+                                name = "create"
+                                parameterCount = 3
+                            }?.invoke(leftStatusIcons, enumStatusBarLocationHome, darkIconDispatcher)
                     }
-                    fldAnimatorController?.get(container)?.let {
-                        metSetAnimatorController?.invoke(leftStatusIcons, it)
+                    val statusBarIconController = statusBarIconControllerRef
+                    if (darkIconManager != null && statusBarIconController != null) {
+                        // The old 3-arg create() took the dispatcher and registered internally.
+                        // createMiuiIconManager() does not, so hook the receiver up by hand or the
+                        // left icons never follow the light/dark background.
+                        if (darkIconDispatcher != null) {
+                            runCatching {
+                                darkIconDispatcher.asResolver().optional(true).firstMethodOrNull {
+                                    name = "addDarkReceiver"
+                                    parameterCount = 1
+                                }?.invoke(darkIconManager)
+                            }
+                        }
+                        metAddIconGroup?.invoke(statusBarIconController, darkIconManager)
+                        val blockList = fldStatusBarIconList?.get(statusBarIconController)?.let { controller ->
+                            fldSlots?.get(controller)?.let { slots ->
+                                slots.mapNotNull { slot ->
+                                    fldSlotName?.get(slot)
+                                }
+                            }
+                        }?.let {
+                            getLeftBlockList(it)
+                        } ?: leftBlockList
+                        metSetIgnoredSlots?.invoke(leftStatusIcons, blockList)
+                        fldStatusContainer?.get(injector)?.let { container ->
+                            fldAnimatable?.get(container)?.let {
+                                metSetAnimatable?.invoke(leftStatusIcons, it)
+                            }
+                            fldAnimatorController?.get(container)?.let {
+                                metSetAnimatorController?.invoke(leftStatusIcons, it)
+                            }
+                        }
                     }
                 }
-                result(ori)
+            }
+            // onViewCreated -> HomeStatusBarViewBinderImpl.bind, which owns the injector instance.
+            val clzBinderImpl = "com.android.systemui.statusbar.pipeline.shared.ui.binder.HomeStatusBarViewBinderImpl".toClassOrNull()
+            val fldInjector = clzBinderImpl?.resolve()?.optional(true)?.firstFieldOrNull {
+                name = "mInjector"
+            }?.toTyped<Any>()
+            if (clzBinderImpl != null && fldInjector != null) {
+                clzBinderImpl.resolve().optional(true).firstMethodOrNull {
+                    name = "bind"
+                    parameterCount = 4
+                }?.hook {
+                    val ori = proceed()
+                    fldInjector.get(thisObject)?.let { setUpLeftContainer(it) }
+                    result(ori)
+                }
+            } else {
+                resolve().optional(true).firstMethodOrNull {
+                    name = "onViewCreated"
+                }?.hook {
+                    val ori = proceed()
+                    setUpLeftContainer(thisObject)
+                    result(ori)
+                }
             }
             metAnimateShow?.hook {
                 val ori = proceed()
@@ -209,35 +275,30 @@ object LeftContainer : StaticHooker() {
                     val leftStatusIcons = mStatusBar?.let {
                         getOrPutStatusIconContainer(it, it.context, true)
                     }
-                    module.getInvoker(metAnimateShow).setType(XposedInterface.Invoker.Type.ORIGIN).invoke(
-                        thisObject,
-                        leftStatusIcons,
-                        getArg(1),
-                        getArg(2),
-                    )
+                    val newArgs = args.toTypedArray()
+                    newArgs[0] = leftStatusIcons
+                    module.getInvoker(metAnimateShow).setType(XposedInterface.Invoker.Type.ORIGIN)
+                        .invoke(thisObject, *newArgs)
                 }
                 result(ori)
             }
             metAnimateHiddenState?.hook {
                 val ori = proceed()
                 val mNotificationIconAreaInner = fldNotificationIconAreaInner?.get(thisObject)
-                if (mNotificationIconAreaInner != null && getArg(1) as? View == mNotificationIconAreaInner) {
+                if (mNotificationIconAreaInner != null && getArg(hideViewArgIndex) as? View == mNotificationIconAreaInner) {
                     val mStatusBar = fldStatusBar?.get(thisObject)
                     val leftStatusIcons = mStatusBar?.let {
                         getOrPutStatusIconContainer(it, it.context, true)
                     }
-                    module.getInvoker(metAnimateHiddenState).setType(XposedInterface.Invoker.Type.ORIGIN).invoke(
-                        thisObject,
-                        getArg(0),
-                        leftStatusIcons,
-                        getArg(2),
-                        getArg(3),
-                    )
+                    val newArgs = args.toTypedArray()
+                    newArgs[hideViewArgIndex] = leftStatusIcons
+                    module.getInvoker(metAnimateHiddenState).setType(XposedInterface.Invoker.Type.ORIGIN)
+                        .invoke(thisObject, *newArgs)
                 }
                 result(ori)
             }
-            resolve().firstMethodOrNull {
-                name = "onDestroyView"
+            resolve().optional(true).firstMethodOrNull {
+                name { it == "onUnbind" || it == "onDestroyView" }
             }?.hook {
                 val ori = proceed()
                 val mStatusBar = fldStatusBar?.get(thisObject)
