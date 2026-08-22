@@ -32,10 +32,31 @@ object ExpandNotification : StaticHooker() {
 
     private val clzRowAppearanceCoordinator by "com.android.systemui.statusbar.notification.collection.coordinator.RowAppearanceCoordinator".lazyClassOrNull()
     private val clzPipelineEntry by "com.android.systemui.statusbar.notification.collection.PipelineEntry".lazyClassOrNull()
-    private val getRepresentativeEntry by lazy {
-        clzPipelineEntry?.resolve()?.firstMethodOrNull {
-            name = "getRepresentativeEntry"
+    // getRepresentativeEntry moved off PipelineEntry onto ListEntry, reachable via asListEntry().
+    private val metAsListEntry by lazy {
+        clzPipelineEntry?.resolve()?.optional(true)?.firstMethodOrNull {
+            name = "asListEntry"
         }?.toTyped<Any>()
+    }
+    private val metGetRepresentativeEntry by lazy {
+        clzPipelineEntry?.resolve()?.optional(true)?.firstMethodOrNull {
+            name = "getRepresentativeEntry"
+            superclass()
+        }?.toTyped<Any>()
+            ?: "com.android.systemui.statusbar.notification.collection.ListEntry".toClassOrNull()
+                ?.resolve()?.optional(true)?.firstMethodOrNull {
+                    name = "getRepresentativeEntry"
+                    superclass()
+                }?.toTyped<Any>()
+    }
+    private val getRepresentativeEntry: ((Any?) -> Any?) by lazy {
+        { entry: Any? ->
+            if (entry == null) null
+            else metGetRepresentativeEntry?.let { met ->
+                runCatching { met.invoke(entry) }.getOrNull()
+                    ?: metAsListEntry?.invoke(entry)?.let { runCatching { met.invoke(it) }.getOrNull() }
+            }
+        }
     }
     private val mSbn by lazy {
         "com.android.systemui.statusbar.notification.collection.NotificationEntry".toClassOrNull()?.resolve()?.firstFieldOrNull {
@@ -83,7 +104,7 @@ object ExpandNotification : StaticHooker() {
                     val newArgs = args.toTypedArray()
                     (newArgs[0] as? List<*>)?.filter { entry ->
                         if (clzPipelineEntry?.isInstance(entry) == true) {
-                            val notificationEntry = getRepresentativeEntry?.invoke(entry) ?: return@filter true
+                            val notificationEntry = getRepresentativeEntry(entry) ?: return@filter true
                             val sbn = mSbn?.get(notificationEntry) ?: return@filter true
                             val isFocusNotification = mIsFocusNotification?.get(sbn) ?: false
                             if (isFocusNotification) return@filter false

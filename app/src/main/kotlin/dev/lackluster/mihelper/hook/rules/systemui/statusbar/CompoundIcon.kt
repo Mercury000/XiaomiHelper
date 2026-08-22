@@ -122,8 +122,10 @@ object CompoundIcon : StaticHooker() {
                     ?.resolve()?.firstFieldOrNull {
                         name = "mAreActiveLocationRequests"
                     }?.toTyped<Boolean>()
-                resolve().firstMethodOrNull {
-                    name = "onLocationActiveChanged"
+                resolve().optional(true).firstMethodOrNull {
+                    name {
+                        it.startsWith("onLocationActiveChanged")
+                    }
                 }?.hook {
                     val ori = proceed()
                     if (metIsCTARequiredLocation?.invoke(null) != true) {

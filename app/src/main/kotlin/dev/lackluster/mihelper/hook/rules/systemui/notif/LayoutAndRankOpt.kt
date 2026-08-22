@@ -65,10 +65,31 @@ object LayoutAndRankOpt : StaticHooker() {
                 name = "getPeopleType"
             }?.toTyped<Int>()
     }
-    private val getRepresentativeEntry by lazy {
-        clzPipelineEntry?.resolve()?.firstMethodOrNull {
-            name = "getRepresentativeEntry"
+    // getRepresentativeEntry moved off PipelineEntry onto ListEntry, reachable via asListEntry().
+    private val metAsListEntry by lazy {
+        clzPipelineEntry?.resolve()?.optional(true)?.firstMethodOrNull {
+            name = "asListEntry"
         }?.toTyped<Any>()
+    }
+    private val metGetRepresentativeEntry by lazy {
+        clzPipelineEntry?.resolve()?.optional(true)?.firstMethodOrNull {
+            name = "getRepresentativeEntry"
+            superclass()
+        }?.toTyped<Any>()
+            ?: "com.android.systemui.statusbar.notification.collection.ListEntry".toClassOrNull()
+                ?.resolve()?.optional(true)?.firstMethodOrNull {
+                    name = "getRepresentativeEntry"
+                    superclass()
+                }?.toTyped<Any>()
+    }
+    private val getRepresentativeEntry: ((Any?) -> Any?) by lazy {
+        { entry: Any? ->
+            if (entry == null) null
+            else metGetRepresentativeEntry?.let { met ->
+                runCatching { met.invoke(entry) }.getOrNull()
+                    ?: metAsListEntry?.invoke(entry)?.let { runCatching { met.invoke(it) }.getOrNull() }
+            }
+        }
     }
     private val mSbn by lazy {
         "com.android.systemui.statusbar.notification.collection.NotificationEntry".toClassOrNull()
@@ -175,12 +196,12 @@ object LayoutAndRankOpt : StaticHooker() {
                     name = "compare"
                 }?.hook {
                     val notification1 = getArg(0)?.let { pipelineEntry ->
-                        getRepresentativeEntry?.invoke(pipelineEntry)?.let { notificationEntry ->
+                        getRepresentativeEntry(pipelineEntry)?.let { notificationEntry ->
                             mSbn?.get(notificationEntry)
                         }
                     }
                     val notification2 = getArg(1)?.let { pipelineEntry ->
-                        getRepresentativeEntry?.invoke(pipelineEntry)?.let { notificationEntry ->
+                        getRepresentativeEntry(pipelineEntry)?.let { notificationEntry ->
                             mSbn?.get(notificationEntry)
                         }
                     }
@@ -225,7 +246,7 @@ object LayoutAndRankOpt : StaticHooker() {
 
     private fun isMessagingStyle(pipelineEntry: Any?): Boolean {
         val notification = pipelineEntry?.let {
-            getRepresentativeEntry?.invoke(it)
+            getRepresentativeEntry(it)
         }?.let {
             mSbn?.get(it)?.notification
         } ?: return false
