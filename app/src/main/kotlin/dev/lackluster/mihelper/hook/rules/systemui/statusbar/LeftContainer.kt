@@ -51,6 +51,26 @@ object LeftContainer : StaticHooker() {
     private var iconManagerFactory: Any? = null
     @Volatile
     private var statusBarIconControllerRef: Any? = null
+    @Volatile
+    private var darkIconDispatcherRef: Any? = null
+
+    // Reuse the provider that built the host's own DarkIconManager; its constructor is inlined by
+    // R8 so it cannot be instantiated directly.
+    private fun createDarkIconManager(
+        clzDarkIconManager: Class<*>?,
+        group: Any?,
+        location: Any?,
+        dispatcher: Any?
+    ): Any? {
+        if (group == null || location == null) return null
+        val provider = iconManagerFactory ?: return null
+        return runCatching {
+            provider.asResolver().optional(true).firstMethodOrNull {
+                name = "create"
+                parameterCount = 3
+            }?.invoke(group, location, dispatcher ?: darkIconDispatcherRef)
+        }.getOrNull()
+    }
 
     override fun onInit() {
         updateSelfState(leftContainerMode != 0)
@@ -81,18 +101,37 @@ object LeftContainer : StaticHooker() {
         val fldAnimatorController = clzMiuiStatusIconContainer?.resolve()?.firstFieldOrNull {
             name = "animatorController"
         }?.toTyped<Any>()
+        // The host builds the home DarkIconManager inside this synthetic lambda, which also holds
+        // the Dagger provider (f$4), the dark icon dispatcher (f$5) and the icon controller (f$6).
+        // Capturing all three here avoids reaching for TintedIconManager.Factory, whose
+        // createMiuiIconManager() returns a MiuiLightDarkIconManager -- that variant relies on an
+        // external setLight() call that never happens for the home bar, so it never inverts.
+        val clzDarkIconManager = "com.android.systemui.statusbar.phone.ui.DarkIconManager".toClassOrNull()
+        val clzStatusBarRootLambda = (
+            "com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt" +
+                "\$\$ExternalSyntheticLambda3"
+            ).toClassOrNull()
+        clzStatusBarRootLambda?.apply {
+            val fldProvider = resolve().optional(true).firstFieldOrNull { name = "f\$4" }?.toTyped<Any>()
+            val fldDispatcher = resolve().optional(true).firstFieldOrNull { name = "f\$5" }?.toTyped<Any>()
+            val fldController = resolve().optional(true).firstFieldOrNull { name = "f\$6" }?.toTyped<Any>()
+            resolve().optional(true).firstMethodOrNull {
+                name = "invoke"
+                parameterCount = 1
+            }?.hook {
+                fldProvider?.get(thisObject)?.let { iconManagerFactory = it }
+                fldDispatcher?.get(thisObject)?.let { darkIconDispatcherRef = it }
+                fldController?.get(thisObject)?.let { statusBarIconControllerRef = it }
+                result(proceed())
+            }
+        }
         val clzStatusBarIconControllerImpl = "com.android.systemui.statusbar.phone.ui.StatusBarIconControllerImpl".toClassOrNull()
+        // Fallback in case the lambda above is restructured: the controller is a singleton.
         clzStatusBarIconControllerImpl?.resolve()?.optional(true)?.firstConstructorOrNull()?.hook {
             val ori = proceed()
-            statusBarIconControllerRef = thisObject
+            if (statusBarIconControllerRef == null) statusBarIconControllerRef = thisObject
             result(ori)
         }
-        $$"com.android.systemui.statusbar.phone.ui.TintedIconManager$Factory".toClassOrNull()
-            ?.resolve()?.optional(true)?.firstConstructorOrNull()?.hook {
-                val ori = proceed()
-                iconManagerFactory = thisObject
-                result(ori)
-            }
         val metAddIconGroup = clzStatusBarIconControllerImpl?.resolve()?.firstMethodOrNull {
             name = "addIconGroup"
             parameterCount = 1
@@ -198,30 +237,17 @@ object LeftContainer : StaticHooker() {
                         }
                     }
                     val darkIconDispatcher = fldDarkIconDispatcher?.get(injector)
-                    // create(container, location, dispatcher) -> createMiuiIconManager(container, location, boolean, int)
-                    val darkIconManager = iconManagerFactory?.let { factory ->
-                        factory.asResolver().optional(true).firstMethodOrNull {
-                            name = "createMiuiIconManager"
-                            parameterCount = 4
-                        }?.invoke(leftStatusIcons, enumStatusBarLocationHome, true, 0)
-                            ?: factory.asResolver().optional(true).firstMethodOrNull {
-                                name = "create"
-                                parameterCount = 3
-                            }?.invoke(leftStatusIcons, enumStatusBarLocationHome, darkIconDispatcher)
-                    }
+                    // Build a DarkIconManager for our container the same way the host builds the
+                    // one for statusIcons: it registers every icon view with the dispatcher in
+                    // onIconAdded, which is what makes them follow the background.
+                    val darkIconManager = createDarkIconManager(
+                        clzDarkIconManager,
+                        leftStatusIcons,
+                        enumStatusBarLocationHome,
+                        darkIconDispatcher
+                    )
                     val statusBarIconController = statusBarIconControllerRef
                     if (darkIconManager != null && statusBarIconController != null) {
-                        // The old 3-arg create() took the dispatcher and registered internally.
-                        // createMiuiIconManager() does not, so hook the receiver up by hand or the
-                        // left icons never follow the light/dark background.
-                        if (darkIconDispatcher != null) {
-                            runCatching {
-                                darkIconDispatcher.asResolver().optional(true).firstMethodOrNull {
-                                    name = "addDarkReceiver"
-                                    parameterCount = 1
-                                }?.invoke(darkIconManager)
-                            }
-                        }
                         metAddIconGroup?.invoke(statusBarIconController, darkIconManager)
                         val blockList = fldStatusBarIconList?.get(statusBarIconController)?.let { controller ->
                             fldSlots?.get(controller)?.let { slots ->
