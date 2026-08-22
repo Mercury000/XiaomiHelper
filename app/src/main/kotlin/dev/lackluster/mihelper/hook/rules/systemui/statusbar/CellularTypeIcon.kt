@@ -70,50 +70,59 @@ object CellularTypeIcon : StaticHooker() {
     override fun onHook() {
         if (typeSingle || typeCustom) {
             $$"com.miui.interfaces.IOperatorCustomizedPolicy$OperatorConfig".toClassOrNull()?.apply {
-                val showMobileDataTypeSingle = resolve().firstFieldOrNull {
+                val showMobileDataTypeSingle = resolve().optional(true).firstFieldOrNull {
                     name = "showMobileDataTypeSingle"
                 }?.toTyped<Boolean>()
-                val mobileTypeName = resolve().firstFieldOrNull {
+                val mobileTypeName = resolve().optional(true).firstFieldOrNull {
                     name = "mobileTypeName"
                 }?.toTyped<List<*>>()
-                resolve().firstConstructor().hook {
-                    val ori = proceed()
-                    if (typeSingle) {
-                        showMobileDataTypeSingle?.set(thisObject, true)
-                    }
-                    if (typeCustom && typeCustomVal.isNotBlank()) {
-                        val typeList = typeCustomVal.split(',')
-                        if (typeList.size == 1 && typeList[0].isNotBlank()) {
-                            mobileTypeName?.set(
-                                thisObject,
-                                List(15) { typeList[0] }
-                            )
-                        } else if (typeList.size == 15) {
-                            mobileTypeName?.set(
-                                thisObject,
-                                typeList
-                            )
+                val patchConfig = { config: Any? ->
+                    if (config != null) {
+                        if (typeSingle) {
+                            showMobileDataTypeSingle?.set(config, true)
+                        }
+                        if (typeCustom && typeCustomVal.isNotBlank()) {
+                            val typeList = typeCustomVal.split(',')
+                            if (typeList.size == 1 && typeList[0].isNotBlank()) {
+                                mobileTypeName?.set(config, List(15) { typeList[0] })
+                            } else if (typeList.size == 15) {
+                                mobileTypeName?.set(config, typeList)
+                            }
                         }
                     }
-                    result(ori)
                 }
+                // OperatorConfig's constructor is inlined away on newer ROMs, so patch every
+                // config on its way out of the policy instead of at construction time.
+                resolve().optional(true).firstConstructorOrNull()?.hook {
+                    val ori = proceed()
+                    patchConfig(thisObject)
+                    result(ori)
+                } ?: "com.android.systemui.MiuiOperatorCustomizedPolicy".toClassOrNull()
+                    ?.resolve()?.optional(true)?.firstMethodOrNull {
+                        name = "getMiuiOperatorConfig"
+                        parameters(Int::class)
+                    }?.hook {
+                        val ori = proceed()
+                        patchConfig(ori)
+                        result(ori)
+                    }
             }
         }
         if (modifyTypeFW) {
             "com.miui.systemui.statusbar.views.MobileTypeDrawable".toClassOrNull()?.apply {
-                val mMobileTypeTextPaint = resolve().firstFieldOrNull {
+                val mMobileTypeTextPaint = resolve().optional(true).firstFieldOrNull {
                     name = "mMobileTypeTextPaint"
                 }?.toTyped<Paint>()
-                val mMobileTypePlusPaint = resolve().firstFieldOrNull {
+                val mMobileTypePlusPaint = resolve().optional(true).firstFieldOrNull {
                     name = "mMobileTypePlusPaint"
                 }?.toTyped<Paint>()
-                resolve().firstConstructor().hook {
+                resolve().optional(true).firstConstructorOrNull()?.hook {
                     val ori = proceed()
                     mMobileTypeTextPaint?.get(thisObject)?.typeface = typefaceTypeFW
                     mMobileTypePlusPaint?.get(thisObject)?.typeface = typefaceTypeFW
                     result(ori)
                 }
-                resolve().firstMethodOrNull {
+                resolve().optional(true).firstMethodOrNull {
                     name = "setMiuiStatusBarTypeface"
                 }?.hook {
                     val paint = getArg(0) as? Array<*>
