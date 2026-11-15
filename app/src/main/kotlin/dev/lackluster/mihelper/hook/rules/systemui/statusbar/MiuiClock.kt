@@ -38,6 +38,7 @@ import dev.lackluster.mihelper.hook.rules.systemui.ResourcesUtils.pad_clock
 import dev.lackluster.mihelper.hook.rules.systemui.compat.CommonClassUtils.clzMiuiClock
 import dev.lackluster.mihelper.hook.utils.RemotePreferences.lazyGet
 import dev.lackluster.mihelper.hook.utils.toTyped
+import io.github.libxposed.api.XposedInterface
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -127,18 +128,32 @@ object MiuiClock : StaticHooker() {
             }
         }
         clzMiuiClock?.apply {
-            resolve().firstMethodOrNull {
-                name = "updateTime"
-                parameterCount = 0
-            }?.hook {
-                // Resolve IDs from the clock's host if Application initialization
-                // was bypassed, before matching the configured clock format.
-                (thisObject as? TextView)?.let { ResourcesUtils.ensureReady(it.context) }
-                if (geek) {
-                    updateTimeGeek()
-                } else {
-                    updateTime()
+            val constructorHooks = mutableListOf<XposedInterface.HookHandle>()
+            var updateTimeHooked = false
+            // The ROM's native clock hook is installed after package loading and
+            // overwrites an earlier updateTime hook. Register after the first
+            // clock is constructed, before its initial onAttachedToWindow update.
+            constructorHooks += resolve().constructor {}.hookAll {
+                val ori = proceed()
+                synchronized(MiuiClock) {
+                    if (!updateTimeHooked) {
+                        val updateTimeMethod = resolve().firstMethodOrNull {
+                            name = "updateTime"
+                            parameterCount = 0
+                        } ?: return@synchronized
+                        (thisObject as? TextView)?.let { ResourcesUtils.ensureReady(it.context) }
+                        updateTimeMethod.hook {
+                            if (geek) {
+                                updateTimeGeek()
+                            } else {
+                                updateTime()
+                            }
+                        }
+                        updateTimeHooked = true
+                        constructorHooks.forEach { it.unhook() }
+                    }
                 }
+                result(ori)
             }
         }
     }
