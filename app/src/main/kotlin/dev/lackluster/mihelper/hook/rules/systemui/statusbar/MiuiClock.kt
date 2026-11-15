@@ -38,6 +38,7 @@ import dev.lackluster.mihelper.hook.rules.systemui.ResourcesUtils.pad_clock
 import dev.lackluster.mihelper.hook.rules.systemui.compat.CommonClassUtils.clzMiuiClock
 import dev.lackluster.mihelper.hook.utils.RemotePreferences.lazyGet
 import dev.lackluster.mihelper.hook.utils.toTyped
+import dev.lackluster.mihelper.hook.utils.i
 import java.util.Objects
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -45,6 +46,9 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.ceil
 
 object MiuiClock : StaticHooker() {
+    private val tracedClockIds = ConcurrentHashMap.newKeySet<Int>()
+    private val tracedClockStates = ConcurrentHashMap.newKeySet<Int>()
+    private val tracedClockFormats = ConcurrentHashMap.newKeySet<Int>()
     private val showAMPM by Preferences.SystemUI.StatusBar.Clock.EASY_SHOW_AMPM.lazyGet()
     private val showLeadingZero by Preferences.SystemUI.StatusBar.Clock.EASY_SHOW_LEADING_ZERO.lazyGet()
     private val showSecond by Preferences.SystemUI.StatusBar.Clock.EASY_SHOW_SECONDS.lazyGet()
@@ -104,6 +108,7 @@ object MiuiClock : StaticHooker() {
     }
 
     override fun onHook() {
+        i { "CLOCK_DIAG class=$clzMiuiClock geek=$geek pattern=$geekPatternClock" }
         if (refreshEverySecond) {
             "com.android.keyguard.KeyguardUpdateMonitor".toClassOrNull()?.apply {
                 val mHandler = resolve().firstFieldOrNull {
@@ -127,13 +132,20 @@ object MiuiClock : StaticHooker() {
             }
         }
         clzMiuiClock?.apply {
-            resolve().firstMethodOrNull {
+            val target = resolve().firstMethodOrNull {
                 name = "updateTime"
                 parameterCount = 0
-            }?.hook {
+            }
+            i { "CLOCK_DIAG target=${target?.self}" }
+            target?.hook {
                 // Resolve IDs from the clock's host if Application initialization
                 // was bypassed, before matching the configured clock format.
                 (thisObject as? TextView)?.let { ResourcesUtils.ensureReady(it.context) }
+                (thisObject as? TextView)?.let { view ->
+                    if (tracedClockIds.add(view.id)) i {
+                        "CLOCK_DIAG callback id=${view.id.toString(16)} name=${runCatching { view.resources.getResourceName(view.id) }.getOrNull()} pkg=${view.context.packageName} expectedClock=${clock.toString(16)} pad=${pad_clock.toString(16)} big=${big_time.toString(16)}"
+                    }
+                }
                 if (geek) {
                     updateTimeGeek()
                 } else {
@@ -173,6 +185,9 @@ object MiuiClock : StaticHooker() {
         val controller = fldMiuiStatusBarClockController?.get(thisObject)
         val calendar = controller?.let { fldCalendar?.get(it) }
         val is24 = controller?.let { fldIs24?.get(it) }
+        if (clockView != null && tracedClockStates.add(clockView.id)) i {
+            "CLOCK_DIAG state id=${clockView?.id?.toString(16)} controller=${controller?.javaClass?.name} calendar=${calendar?.javaClass?.name} is24=$is24"
+        }
         if (context == null || calendar == null || is24 == null) return result(proceed())
         val fmtString = when (clockView.id) {
             clock -> geekPatternClock
@@ -184,6 +199,7 @@ object MiuiClock : StaticHooker() {
             else -> null
         } ?: return result(proceed())
         val dateTime = metFormat.invoke(calendar, context, fmtString)
+        if (tracedClockFormats.add(clockView.id)) i { "CLOCK_DIAG format=$fmtString output=$dateTime" }
         clockView.text = dateTime
         if (
             fixedWidth && refreshEverySecond && needRefreshBySecond(context, clockView.id, is24) &&
