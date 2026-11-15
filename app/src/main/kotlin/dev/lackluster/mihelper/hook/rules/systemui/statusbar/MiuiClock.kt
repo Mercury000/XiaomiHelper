@@ -129,7 +129,11 @@ object MiuiClock : StaticHooker() {
         clzMiuiClock?.apply {
             resolve().firstMethodOrNull {
                 name = "updateTime"
+                parameterCount = 0
             }?.hook {
+                // Resolve IDs from the clock's host if Application initialization
+                // was bypassed, before matching the configured clock format.
+                (thisObject as? TextView)?.let { ResourcesUtils.ensureReady(it.context) }
                 if (geek) {
                     updateTimeGeek()
                 } else {
