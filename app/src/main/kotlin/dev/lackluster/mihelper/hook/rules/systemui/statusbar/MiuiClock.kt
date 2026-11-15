@@ -109,6 +109,12 @@ object MiuiClock : StaticHooker() {
 
     override fun onHook() {
         i { "CLOCK_DIAG class=$clzMiuiClock geek=$geek pattern=$geekPatternClock" }
+        val caller = clzMiuiStatusBarClockController.resolve().firstMethod {
+            name = "updateTime\$1"
+            parameterCount = 0
+        }
+        val deoptimized = module.deoptimize(caller.self)
+        i { "CLOCK_DIAG caller=${caller.self} deoptimized=$deoptimized" }
         if (refreshEverySecond) {
             "com.android.keyguard.KeyguardUpdateMonitor".toClassOrNull()?.apply {
                 val mHandler = resolve().firstFieldOrNull {
