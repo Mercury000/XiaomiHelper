@@ -16,6 +16,8 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    env:
+      TELEGRAM_ENABLED: ${{ secrets.BOT_TOKEN != '' && secrets.CHANNEL_ID != '' }}
 
     steps:
     - name: Checkout repository
@@ -39,8 +41,31 @@ jobs:
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@v4
 
-    - name: Decode android signing key
-      run: echo ${{ secrets.SIGNING_KEY }} | base64 -d > keystore.jks
+    - name: Prepare Android signing
+      id: signing
+      env:
+        SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        KEYSTORE_PWD: ${{ secrets.KEYSTORE_PWD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PWD: ${{ secrets.KEY_PWD }}
+      run: |
+        if [[ -z "$SIGNING_KEY" && -z "$KEYSTORE_PWD" && -z "$KEY_ALIAS" && -z "$KEY_PWD" ]]; then
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "Signing is not configured; building unsigned APKs for CI artifacts."
+          exit 0
+        fi
+        for name in SIGNING_KEY KEYSTORE_PWD KEY_ALIAS KEY_PWD; do
+          if [[ -z "${!name}" ]]; then
+            echo "::error::Missing signing secret: $name"
+            exit 1
+          fi
+        done
+        printf '%s' "$SIGNING_KEY" | base64 --decode > keystore.jks
+        if [[ ! -s keystore.jks ]]; then
+          echo "::error::Decoded signing key is empty."
+          exit 1
+        fi
+        echo "enabled=true" >> "$GITHUB_OUTPUT"
 
     - name: Prepare Version and Build Type
       run: |
@@ -71,19 +96,32 @@ jobs:
         fi
 
     - name: Build apks
-      run: ./gradlew ${{ env.BUILD_TASKS }}
+      run: |
+        if [[ "${{ steps.signing.outputs.enabled }}" != "true" ]]; then
+          unset KEYSTORE_PATH KEYSTORE_PWD KEY_ALIAS KEY_PWD
+        fi
+        ./gradlew ${{ env.BUILD_TASKS }}
       env:
         KEYSTORE_PATH: "../keystore.jks"
         KEYSTORE_PWD: ${{ secrets.KEYSTORE_PWD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PWD: ${{ secrets.KEY_PWD }}
 
+    - name: Upload APK artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: apks-${{ env.SHA7 }}-${{ steps.signing.outputs.enabled == 'true' && 'signed' || 'unsigned' }}
+        path: app/build/outputs/apk/**/*.apk
+        if-no-files-found: error
+
     - name: Get tags
       id: tag
+      if: github.event_name != 'workflow_dispatch' && env.TELEGRAM_ENABLED == 'true' && steps.signing.outputs.enabled == 'true'
       uses: JinoArch/get-latest-tag@latest
 
     - name: Generate changelog
       id: changelog
+      if: env.TELEGRAM_ENABLED == 'true' && steps.signing.outputs.enabled == 'true'
       run: |
         {
           echo 'CHANGELOG<<EOF'
@@ -105,7 +143,7 @@ jobs:
         } >> "$GITHUB_ENV"
 
     - name: Post to Telegram ci channel
-      if: ${{ success() }}
+      if: success() && env.TELEGRAM_ENABLED == 'true' && steps.signing.outputs.enabled == 'true'
       env:
         CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
